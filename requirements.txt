@@ -1,0 +1,4 @@
+Flask==2.3.3
+Werkzeug==2.3.7
+ffmpeg-python==0.2.0
+gunicorn==21.2.0

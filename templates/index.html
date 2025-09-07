@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reodash</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .tree-item {
+            cursor: pointer;
+            padding: 0.25rem 0;
+        }
+        .tree-item:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 0.25rem;
+        }
+        .tree-content {
+            margin-left: 1rem;
+            border-left: 1px solid #495057;
+            padding-left: 1rem;
+        }
+        .recording-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+            padding: 1rem 0;
+        }
+        .recording-card {
+            background-color: #343a40;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.2s;
+            position: relative;
+        }
+        .recording-card:hover {
+            transform: scale(1.05);
+        }
+        .recording-card:hover .play-overlay {
+            opacity: 1;
+        }
+        .recording-thumbnail {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+        }
+        .recording-placeholder {
+            width: 100%;
+            height: 150px;
+            background-color: #343a40;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .placeholder-icon {
+            color: #adb5bd;
+            font-size: 48px;
+        }
+        .recording-info {
+            padding: 0.5rem;
+            font-size: 0.875rem;
+            text-align: center;
+        }
+        .play-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.55);
+            border-radius: 10px;
+            padding: 10px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+            z-index: 10;
+        }
+        .play-icon {
+            color: white;
+            font-size: 24px;
+            margin-left: 3px; /* Slight offset to center the triangle */
+        }
+        .sidebar {
+            height: 100vh;
+            overflow-y: auto;
+            background-color: #212529;
+            border-right: 1px solid #495057;
+        }
+        .main-content {
+            height: 100vh;
+            overflow-y: auto;
+        }
+        .breadcrumb {
+            background-color: #343a40;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        #videoModal .modal-dialog {
+            max-width: 90vw;
+        }
+        #videoModal video {
+            width: 100%;
+            max-height: 80vh;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar with file tree -->
+            <div class="col-md-3 sidebar p-3">
+                <h5 class="mb-3">
+                    <i class="bi bi-camera-video me-2"></i>
+                    Reodash
+                </h5>
+                <div id="fileTree">
+                    <div class="text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Main content area -->
+            <div class="col-md-9 main-content p-3">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb" id="breadcrumb">
+                        <li class="breadcrumb-item active">Select a folder to view recordings</li>
+                    </ol>
+                </nav>
+                
+                <!-- Sorting Controls -->
+                <div id="sortingControls" class="mb-3" style="display: none;">
+                    <div class="row align-items-center">
+                        <div class="col-auto">
+                            <label for="sortSelect" class="form-label text-light mb-0">Sort by:</label>
+                        </div>
+                        <div class="col-auto">
+                            <select id="sortSelect" class="form-select form-select-sm bg-dark text-light border-secondary" onchange="applySorting()">
+                                <option value="time-asc">Time (Earliest First)</option>
+                                <option value="time-desc" selected>Time (Latest First)</option>
+                                <option value="name-asc">Name (A-Z)</option>
+                                <option value="name-desc">Name (Z-A)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="recordingsGrid" class="recording-grid">
+                    <!-- Recordings will be displayed here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Modal -->
+    <div class="modal fade" id="videoModal" tabindex="-1" aria-labelledby="videoModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="videoModalLabel">Recording Playback</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <video id="modalVideo" controls preload="metadata" style="width: 100%; max-height: 70vh;">
+                        Your browser does not support the video tag.
+                    </video>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+    <script>
+        let fileTree = {};
+        let currentPath = [];
+
+        // Function to parse datetime from filename and format as time
+        function formatRecordingTime(basename) {
+            // Extract datetime from basename like "Driveway_01_20250906003620"
+            const match = basename.match(/_(\d{14})$/);
+            if (match) {
+                const datetime = match[1]; // "20250906003620"
+                const year = datetime.substring(0, 4);
+                const month = datetime.substring(4, 6);
+                const day = datetime.substring(6, 8);
+                const hour = datetime.substring(8, 10);
+                const minute = datetime.substring(10, 12);
+                const second = datetime.substring(12, 14);
+                
+                // Format as HH:MM:SS
+                return `${hour}:${minute}:${second}`;
+            }
+            return basename; // Fallback to original name
+        }
+
+        // Function to extract datetime for sorting
+        function getRecordingDateTime(basename) {
+            const match = basename.match(/_(\d{14})$/);
+            if (match) {
+                return match[1]; // Return "20250906003620" format for sorting
+            }
+            return basename; // Fallback
+        }
+
+        // Function to sort recordings based on selected option
+        function sortRecordings(recordings, sortOption) {
+            const sorted = [...recordings]; // Create a copy
+            
+            switch(sortOption) {
+                case 'time-asc':
+                    return sorted.sort((a, b) => {
+                        const timeA = getRecordingDateTime(a.base_name);
+                        const timeB = getRecordingDateTime(b.base_name);
+                        return timeA.localeCompare(timeB);
+                    });
+                case 'time-desc':
+                    return sorted.sort((a, b) => {
+                        const timeA = getRecordingDateTime(a.base_name);
+                        const timeB = getRecordingDateTime(b.base_name);
+                        return timeB.localeCompare(timeA);
+                    });
+                case 'name-asc':
+                    return sorted.sort((a, b) => a.base_name.localeCompare(b.base_name));
+                case 'name-desc':
+                    return sorted.sort((a, b) => b.base_name.localeCompare(a.base_name));
+                default:
+                    return sorted;
+            }
+        }
+
+        // Function to apply current sorting and refresh display
+        function applySorting() {
+            if (currentPath.length === 4) {
+                const [camera, year, month, day] = currentPath;
+                showRecordings(camera, year, month, day);
+            } else if (currentPath[0] === 'Today') {
+                showToday();
+            }
+        }
+
+        // Reusable grid renderer for both Today and camera/day views
+        function renderRecordingsGrid(recordings) {
+            const grid = document.getElementById('recordingsGrid');
+            const sortingControls = document.getElementById('sortingControls');
+            const sortSelect = document.getElementById('sortSelect');
+
+            grid.innerHTML = '';
+            sortingControls.style.display = 'block';
+
+            const sortOption = sortSelect.value;
+            const sortedRecordings = sortRecordings(recordings, sortOption);
+
+            sortedRecordings.forEach(recording => {
+                const card = document.createElement('div');
+                card.className = 'recording-card';
+                card.onclick = () => playVideo(recording);
+
+                const hasThumb = !!recording.thumbnail;
+                const thumbnailSrc = hasThumb 
+                    ? `/api/files/${recording.path}/${recording.thumbnail}`
+                    : null;
+
+                const recordingTime = formatRecordingTime(recording.base_name);
+
+                card.innerHTML = `
+                    ${hasThumb ? `
+                        <img src="${thumbnailSrc}" 
+                             alt="Recording thumbnail" 
+                             class="recording-thumbnail">
+                    ` : `
+                        <div class="recording-placeholder">
+                            <i class="bi bi-camera-video placeholder-icon"></i>
+                        </div>
+                    `}
+                    <div class="play-overlay">
+                        <i class="bi bi-play-fill play-icon"></i>
+                    </div>
+                    <div class="recording-info">
+                        <div class="fw-bold">${recordingTime}</div>
+                    </div>
+                `;
+
+                grid.appendChild(card);
+            });
+        }
+
+        // Load file tree on page load
+        async function loadFileTree() {
+            try {
+                const response = await fetch('/api/tree');
+                fileTree = await response.json();
+                renderFileTree();
+                // Default to showing today's recordings on load
+                showToday();
+            } catch (error) {
+                console.error('Error loading file tree:', error);
+                document.getElementById('fileTree').innerHTML = '<div class="text-danger">Error loading file tree</div>';
+            }
+        }
+
+        // Render the file tree in the sidebar
+        function renderFileTree() {
+            const container = document.getElementById('fileTree');
+            container.innerHTML = '';
+            
+            if (Object.keys(fileTree).length === 0) {
+                container.innerHTML = '<div class="text-muted">No recordings found</div>';
+                return;
+            }
+
+            // Add Today top-level node
+            const todayCount = Array.isArray(fileTree['Today']) ? fileTree['Today'].length : 0;
+            const todayDiv = document.createElement('div');
+            todayDiv.className = 'tree-item';
+            todayDiv.innerHTML = `
+                <div onclick="showToday()">
+                    <i class="bi bi-sun me-1"></i>
+                    Today${todayCount ? ` (${todayCount} recordings)` : ''}
+                </div>
+            `;
+            container.appendChild(todayDiv);
+
+            for (const [camera, years] of Object.entries(fileTree)) {
+                if (camera === 'Today') continue; // skip special Today node
+                const cameraDiv = document.createElement('div');
+                cameraDiv.className = 'tree-item';
+                cameraDiv.innerHTML = `
+                    <div onclick="toggleTreeItem(this)">
+                        <i class="bi bi-chevron-right me-1"></i>
+                        <i class="bi bi-camera me-1"></i>
+                        ${camera}
+                    </div>
+                    <div class="tree-content" style="display: none;"></div>
+                `;
+                
+                const yearsContainer = cameraDiv.querySelector('.tree-content');
+                for (const [year, months] of Object.entries(years)) {
+                    const yearDiv = document.createElement('div');
+                    yearDiv.className = 'tree-item';
+                    yearDiv.innerHTML = `
+                        <div onclick="toggleTreeItem(this)">
+                            <i class="bi bi-chevron-right me-1"></i>
+                            <i class="bi bi-calendar me-1"></i>
+                            ${year}
+                        </div>
+                        <div class="tree-content" style="display: none;"></div>
+                    `;
+                    
+                    const monthsContainer = yearDiv.querySelector('.tree-content');
+                    for (const [month, days] of Object.entries(months)) {
+                        const monthDiv = document.createElement('div');
+                        monthDiv.className = 'tree-item';
+                        monthDiv.innerHTML = `
+                            <div onclick="toggleTreeItem(this)">
+                                <i class="bi bi-chevron-right me-1"></i>
+                                <i class="bi bi-calendar2-month me-1"></i>
+                                ${month}
+                            </div>
+                            <div class="tree-content" style="display: none;"></div>
+                        `;
+                        
+                        const daysContainer = monthDiv.querySelector('.tree-content');
+                        for (const [day, recordings] of Object.entries(days)) {
+                            const dayDiv = document.createElement('div');
+                            dayDiv.className = 'tree-item';
+                            dayDiv.innerHTML = `
+                                <div onclick="showRecordings('${camera}', '${year}', '${month}', '${day}')">
+                                    <i class="bi bi-calendar2-day me-1"></i>
+                                    ${day} (${recordings.length} recordings)
+                                </div>
+                            `;
+                            daysContainer.appendChild(dayDiv);
+                        }
+                        monthsContainer.appendChild(monthDiv);
+                    }
+                    yearsContainer.appendChild(yearDiv);
+                }
+                container.appendChild(cameraDiv);
+            }
+        }
+
+        // Toggle tree item expansion
+        function toggleTreeItem(element) {
+            const chevron = element.querySelector('.bi-chevron-right, .bi-chevron-down');
+            const content = element.nextElementSibling;
+            
+            if (content.style.display === 'none') {
+                content.style.display = 'block';
+                chevron.className = chevron.className.replace('bi-chevron-right', 'bi-chevron-down');
+            } else {
+                content.style.display = 'none';
+                chevron.className = chevron.className.replace('bi-chevron-down', 'bi-chevron-right');
+            }
+        }
+
+        // Show recordings for a specific day
+        function showRecordings(camera, year, month, day) {
+            currentPath = [camera, year, month, day];
+            updateBreadcrumb();
+            const recordings = fileTree[camera][year][month][day];
+            renderRecordingsGrid(recordings);
+        }
+
+        function showToday() {
+            currentPath = ['Today'];
+            updateBreadcrumb();
+
+            const recordings = Array.isArray(fileTree['Today']) ? fileTree['Today'] : [];
+            renderRecordingsGrid(recordings);
+        }
+
+        // Update breadcrumb navigation
+        function updateBreadcrumb() {
+            const breadcrumb = document.getElementById('breadcrumb');
+            breadcrumb.innerHTML = '';
+            
+            const homeItem = document.createElement('li');
+            homeItem.className = 'breadcrumb-item';
+            homeItem.innerHTML = '<a href="#" onclick="clearRecordings()">Home</a>';
+            breadcrumb.appendChild(homeItem);
+            
+            currentPath.forEach((item, index) => {
+                const breadcrumbItem = document.createElement('li');
+                breadcrumbItem.className = index === currentPath.length - 1 ? 'breadcrumb-item active' : 'breadcrumb-item';
+                breadcrumbItem.textContent = item;
+                breadcrumb.appendChild(breadcrumbItem);
+            });
+        }
+
+        // Clear recordings view
+        function clearRecordings() {
+            currentPath = [];
+            document.getElementById('recordingsGrid').innerHTML = '';
+            document.getElementById('breadcrumb').innerHTML = '<li class="breadcrumb-item active">Select a folder to view recordings</li>';
+            // Hide sorting controls when going back to tree view
+            document.getElementById('sortingControls').style.display = 'none';
+        }
+
+        // Play video in modal with direct streaming
+        function playVideo(recording) {
+            const modal = new bootstrap.Modal(document.getElementById('videoModal'));
+            const video = document.getElementById('modalVideo');
+            const title = document.getElementById('videoModalLabel');
+            
+            // Track video end state to avoid false error reports
+            let videoEnded = false;
+            
+            console.log('Playing video:', recording);
+            
+            // Reset video element
+            video.pause();
+            video.currentTime = 0;
+            video.removeAttribute('src');
+            
+            // Build title: CameraName YYYY-MM-DD HH:MM:SS
+            const timeStr = formatRecordingTime(recording.base_name);
+            let camera, year, month, day;
+            if (currentPath[0] === 'Today') {
+                const parts = (recording.path || '').split('/');
+                if (parts.length === 4) {
+                    [camera, year, month, day] = parts;
+                }
+            } else {
+                [camera, year, month, day] = currentPath;
+            }
+            if (camera && year && month && day && timeStr) {
+                title.textContent = `${camera} ${year}-${month}-${day} ${timeStr}`;
+            } else {
+                title.textContent = recording.base_name;
+            }
+            
+            // Set up modal close handler to terminate transcoding
+            const modalElement = document.getElementById('videoModal');
+            let hlsJobId = null;
+
+            const handleModalClose = function() {
+                console.log('Modal closing, terminating video stream...');
+                video.pause();
+                video.removeAttribute('src');
+                video.load(); // This will abort the current request
+                hideTranscodingMessage(video);
+                // Attempt to cleanup ephemeral HLS job
+                if (hlsJobId) {
+                    fetch(`/api/hls/${hlsJobId}`, { method: 'DELETE' }).catch(() => {});
+                    hlsJobId = null;
+                }
+            };
+            
+            // Add event listeners for modal close
+            modalElement.addEventListener('hidden.bs.modal', handleModalClose, { once: true });
+            
+            // Show modal first
+            modal.show();
+            
+            // Show loading message
+            showTranscodingMessage(video, 'Loading...');
+            
+            // Set video source - prefer HLS playlist
+            (async () => {
+                const hlsResp = await fetch(`/api/hls/${encodeURIComponent(recording.path)}/${encodeURIComponent(recording.video)}`);
+                let playlistUrl = null;
+                let jobId = null;
+                if (hlsResp.ok) {
+                    const data = await hlsResp.json();
+                    playlistUrl = data && data.playlist;
+                    jobId = data && data.job;
+                    hlsJobId = jobId || null;
+                }
+
+                const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+                if (playlistUrl && (isSafari || (window.Hls && window.Hls.isSupported()))) {
+                    if (isSafari) {
+                        video.src = playlistUrl;
+                    } else {
+                        const hls = new Hls();
+                        hls.loadSource(playlistUrl);
+                        hls.attachMedia(video);
+                    }
+                } else {
+                    // Fallback to MP4 on-the-fly
+                    const videoUrl = `/api/files/${recording.path}/${recording.video}`;
+                    console.log('Loading MP4 fallback:', videoUrl);
+                    video.src = videoUrl;
+                }
+            })();
+            
+            video.addEventListener('loadstart', function() {
+                console.log('Video load started (transcoding in progress)');
+            }, { once: true });
+            
+            video.addEventListener('loadedmetadata', function() {
+                console.log('Video metadata loaded successfully');
+                hideTranscodingMessage(video);
+            }, { once: true });
+            
+            video.addEventListener('canplay', function() {
+                console.log('Video can start playing');
+                hideTranscodingMessage(video);
+                video.play().catch(error => {
+                    console.log('Auto-play prevented:', error);
+                });
+            }, { once: true });
+            
+            video.addEventListener('ended', function() {
+                console.log('Video playback finished normally');
+                videoEnded = true;
+                hideTranscodingMessage(video);
+                // Video has ended normally, just stop here - user can replay if desired
+                if (hlsJobId) {
+                    fetch(`/api/hls/${hlsJobId}`, { method: 'DELETE' }).catch(() => {});
+                    hlsJobId = null;
+                }
+            }, { once: true });
+            
+            video.addEventListener('error', function(e) {
+                console.error('Video error:', e, video.error);
+                
+                // If video already ended normally, ignore subsequent errors
+                if (videoEnded) {
+                    console.log('Ignoring error after video ended normally');
+                    return;
+                }
+                
+                if (video.error) {
+                    console.error('Error details:', {
+                        code: video.error.code,
+                        message: video.error.message,
+                        currentTime: video.currentTime,
+                        duration: video.duration
+                    });
+                    
+                    // More robust check for normal video completion
+                    // Error codes 2 (NETWORK_NO_SOURCE) and 3 (DECODE_ERR) can occur when stream ends
+                    if ((video.error.code === 2 || video.error.code === 3) && 
+                        video.currentTime > 0 && 
+                        video.duration > 0 && 
+                        (video.currentTime >= video.duration - 1 || Math.abs(video.currentTime - video.duration) < 2)) {
+                        console.log(`Video appears to have completed normally, ignoring error code ${video.error.code}`);
+                        videoEnded = true;
+                        hideTranscodingMessage(video);
+                        return;
+                    }
+                }
+                
+                // Only show error for genuine problems
+                showTranscodingMessage(video, `Error loading video: ${video.error ? 'Code ' + video.error.code : 'Unknown error'}`);
+            }, { once: true });
+            
+            // Load the video
+            video.load();
+        }
+        
+        function showTranscodingMessage(video, message) {
+            video.style.display = 'none';
+            let messageDiv = document.getElementById('transcode-message');
+            if (!messageDiv) {
+                messageDiv = document.createElement('div');
+                messageDiv.id = 'transcode-message';
+                messageDiv.style.cssText = 'text-align: center; padding: 50px; color: #6c757d;';
+                video.parentNode.appendChild(messageDiv);
+            }
+            messageDiv.innerHTML = `
+                <div class="spinner-border" role="status" style="margin-bottom: 20px;">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <div>${message}</div>
+            `;
+            messageDiv.style.display = 'block';
+        }
+        
+        function hideTranscodingMessage(video) {
+            video.style.display = 'block';
+            const messageDiv = document.getElementById('transcode-message');
+            if (messageDiv) {
+                messageDiv.style.display = 'none';
+            }
+        }
+
+        // Load file tree when page loads
+        document.addEventListener('DOMContentLoaded', loadFileTree);
+    </script>
+</body>
+</html>

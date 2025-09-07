@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  camera-viewer:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./sample_recordings:/recordings  # Change this to your actual recordings path
+    environment:
+      - RECORDINGS_PATH=/recordings
+    restart: unless-stopped
