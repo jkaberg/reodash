@@ -2,8 +2,8 @@
 
 Minimal self-hosted UI to browse and play camera recordings. Folder-based browser, grid thumbnails, and on‑the‑fly HLS playback.
 
-![Reodash UI](pictures/screenshot.png)
-
+![Reodash on Desktop](pictures/desktop.png)
+![Reodash on Phone](pictures/phone.png)
 ## Features
 
 - Browse by camera/year/month/day plus a Today aggregate
