@@ -287,6 +287,48 @@
                 navigator.serviceWorker.register('/service-worker.js');
             });
         }
+        // Auto-refresh on focus/visibility and every 60s when visible
+        (function() {
+            let lastReloadAt = 0;
+            function isModalOpen() {
+                const modalEl = document.getElementById('videoModal');
+                return modalEl && modalEl.classList.contains('show');
+            }
+            function safeReload() {
+                if (isModalOpen()) return;
+                const now = Date.now();
+                if (now - lastReloadAt < 5000) return; // debounce
+                lastReloadAt = now;
+                try {
+                    if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
+                        navigator.serviceWorker.getRegistration().then(reg => {
+                            if (reg && reg.update) {
+                                reg.update().finally(() => location.reload());
+                            } else {
+                                location.reload();
+                            }
+                        }).catch(() => location.reload());
+                        return;
+                    }
+                } catch (e) {}
+                location.reload();
+            }
+            window.addEventListener('focus', () => {
+                if (document.visibilityState === 'visible') {
+                    setTimeout(safeReload, 100);
+                }
+            });
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    setTimeout(safeReload, 100);
+                }
+            });
+            setInterval(() => {
+                if (document.visibilityState === 'visible') {
+                    safeReload();
+                }
+            }, 60000);
+        })();
         let fileTree = {};
         let currentPath = [];
 
