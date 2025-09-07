@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reodash</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0d6efd">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
+    <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
     <style>
@@ -111,13 +119,83 @@
             right: 0;
             z-index: 1030;
         }
+        
+        /* Responsive tweaks */
+        @media (max-width: 767.98px) {
+            .sidebar,
+            .main-content {
+                height: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            .footer-fixed {
+                position: static;
+            }
+            .recording-grid {
+                gap: 0.75rem;
+            }
+            .recording-thumbnail,
+            .recording-placeholder {
+                height: 120px;
+            }
+            .recording-info {
+                font-size: 0.8rem;
+            }
+            .breadcrumb {
+                font-size: 0.875rem;
+            }
+            #videoModal .modal-dialog {
+                max-width: 100vw;
+                margin: 0;
+            }
+            #videoModal .modal-content {
+                border-radius: 0;
+            }
+            .tree-content {
+                margin-left: 0.5rem;
+                padding-left: 0.5rem;
+            }
+            #mobileSidebar.offcanvas {
+                width: 85vw;
+            }
+        }
+        @media (min-width: 768px) {
+            body {
+                padding-bottom: 48px; /* Prevent content behind fixed footer */
+            }
+        }
     </style>
 </head>
 <body>
+    <!-- Mobile navbar with hamburger (visible on small screens) -->
+    <nav class="navbar navbar-dark bg-dark sticky-top d-md-none">
+        <div class="container-fluid">
+            <a class="navbar-brand d-flex align-items-center" href="#">
+                <i class="bi bi-camera-video me-2"></i>
+                Reodash
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#mobileSidebar" aria-controls="mobileSidebar" aria-label="Open sidebar">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Offcanvas sidebar for mobile -->
+    <div class="offcanvas offcanvas-start text-bg-dark" tabindex="-1" id="mobileSidebar" aria-labelledby="mobileSidebarLabel">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title" id="mobileSidebarLabel">Recordings</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+        <div class="offcanvas-body">
+            <div id="fileTreeMobile">
+                <div class="text-muted">Loading...</div>
+            </div>
+        </div>
+    </div>
+
     <div class="container-fluid">
         <div class="row">
             <!-- Sidebar with file tree -->
-            <div class="col-md-3 sidebar p-3">
+            <div class="col-md-3 d-none d-md-block sidebar p-3">
                 <h5 class="mb-3">
                     <i class="bi bi-camera-video me-2"></i>
                     Reodash
@@ -132,7 +210,7 @@
             </div>
             
             <!-- Main content area -->
-            <div class="col-md-9 main-content p-3">
+            <div class="col-12 col-md-9 main-content p-3">
                 <nav aria-label="breadcrumb">
                     <ol class="breadcrumb" id="breadcrumb">
                         <li class="breadcrumb-item active">Select a folder to view recordings</li>
@@ -190,6 +268,12 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
     <script>
+        // Register service worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/service-worker.js');
+            });
+        }
         let fileTree = {};
         let currentPath = [];
 
@@ -317,9 +401,9 @@
             }
         }
 
-        // Render the file tree in the sidebar
-        function renderFileTree() {
-            const container = document.getElementById('fileTree');
+        // Render the file tree into a given container
+        function renderFileTreeInto(container) {
+            if (!container) return;
             container.innerHTML = '';
             
             if (Object.keys(fileTree).length === 0) {
@@ -398,6 +482,12 @@
             }
         }
 
+        // Render both desktop and mobile trees
+        function renderFileTree() {
+            renderFileTreeInto(document.getElementById('fileTree'));
+            renderFileTreeInto(document.getElementById('fileTreeMobile'));
+        }
+
         // Toggle tree item expansion
         function toggleTreeItem(element) {
             const chevron = element.querySelector('.bi-chevron-right, .bi-chevron-down');
@@ -418,6 +508,12 @@
             updateBreadcrumb();
             const recordings = fileTree[camera][year][month][day];
             renderRecordingsGrid(recordings);
+            // If mobile offcanvas is open, close it after selection
+            const offcanvasEl = document.getElementById('mobileSidebar');
+            if (offcanvasEl && offcanvasEl.classList.contains('show')) {
+                const oc = bootstrap.Offcanvas.getInstance(offcanvasEl) || new bootstrap.Offcanvas(offcanvasEl);
+                oc.hide();
+            }
         }
 
         function showToday() {
@@ -426,6 +522,12 @@
 
             const recordings = Array.isArray(fileTree['Today']) ? fileTree['Today'] : [];
             renderRecordingsGrid(recordings);
+            // Close mobile offcanvas if open
+            const offcanvasEl = document.getElementById('mobileSidebar');
+            if (offcanvasEl && offcanvasEl.classList.contains('show')) {
+                const oc = bootstrap.Offcanvas.getInstance(offcanvasEl) || new bootstrap.Offcanvas(offcanvasEl);
+                oc.hide();
+            }
         }
 
         // Update breadcrumb navigation

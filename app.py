@@ -4,11 +4,12 @@ import json
 import subprocess
 import threading
 import time
-from flask import Flask, render_template, send_file, jsonify, abort, request, Response
+from flask import Flask, render_template, send_file, jsonify, abort, request, Response, make_response, send_from_directory
 import logging
 from pathlib import Path
 import re
 from datetime import datetime
+import base64
 import uuid
 import shutil
 
@@ -157,6 +158,74 @@ def get_file_tree():
 def index():
     """Main page with file tree navigation"""
     return render_template('index.html')
+
+@app.route('/offline')
+def offline():
+    """Offline fallback page for PWA."""
+    return render_template('offline.html')
+
+@app.route('/manifest.webmanifest')
+def manifest():
+    """Serve the PWA manifest."""
+    manifest_data = {
+        "name": "Reodash",
+        "short_name": "Reodash",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#000000",
+        "theme_color": "#0d6efd",
+        "icons": [
+            {"src": "/icons/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any"},
+            {"src": "/icons/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any"}
+        ]
+    }
+    resp = make_response(json.dumps(manifest_data))
+    resp.headers['Content-Type'] = 'application/manifest+json'
+    return resp
+
+@app.route('/service-worker.js')
+def service_worker():
+    """Serve the service worker file from static directory at root scope."""
+    base_dir = Path(__file__).resolve().parent
+    static_dir = base_dir / 'static'
+    resp = send_from_directory(static_dir, 'service-worker.js')
+    # Ensure it's not cached during development
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+# Serve icons for PWA from static; fallback to tiny transparent PNG if missing
+@app.route('/icons/<path:icon_name>')
+def serve_icon(icon_name):
+    allowed = {'icon-192.png', 'icon-512.png'}
+    if icon_name not in allowed:
+        abort(404)
+    base_dir = Path(__file__).resolve().parent
+    static_icons = base_dir / 'static' / 'icons'
+    specific_path = static_icons / icon_name
+    # Some environments might have placeholder zero-byte files; treat as missing
+    if specific_path.exists() and specific_path.stat().st_size > 0:
+        return send_file(str(specific_path), mimetype='image/png')
+    # 1x1 transparent PNG
+    transparent_png_b64 = (
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII='
+    )
+    data = base64.b64decode(transparent_png_b64)
+    return Response(data, mimetype='image/png')
+
+@app.route('/favicon.ico')
+def favicon():
+    """Serve favicon using 192x192 PNG for broad support. Browsers will downscale."""
+    base_dir = Path(__file__).resolve().parent
+    png_192 = base_dir / 'static' / 'icons' / 'icon-192.png'
+    if png_192.exists() and png_192.stat().st_size > 0:
+        return send_file(str(png_192), mimetype='image/png')
+    # Transparent fallback
+    transparent_png_b64 = (
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII='
+    )
+    data = base64.b64decode(transparent_png_b64)
+    return Response(data, mimetype='image/png')
 
 @app.route('/api/tree')
 def api_tree():
